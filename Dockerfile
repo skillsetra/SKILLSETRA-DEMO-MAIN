@@ -1,17 +1,27 @@
 # Single-service SKILLSETRA demo image.
-# One public port (3000) serves the Next.js UI; Next.js proxies /api/v1 to FastAPI on port 8000.
+# One public port serves the Next.js UI; Next.js proxies /api/v1 to FastAPI.
 
-FROM node:20-bookworm-slim AS frontend-build
+FROM node:22-bookworm-slim AS frontend-build
+
 WORKDIR /app/frontend
+
 ENV NEXT_PUBLIC_DEMO_MODE=true \
     NEXT_PUBLIC_API_BASE_URL= \
     BACKEND_INTERNAL_URL=http://127.0.0.1:8000
-COPY frontend/package*.json ./
-RUN npm install --no-audit --no-fund
-COPY frontend/ ./
-RUN npm run build && npm prune --omit=dev
 
-FROM node:20-bookworm-slim AS runtime
+COPY frontend/package*.json ./
+
+RUN npm install --no-audit --no-fund
+
+COPY frontend/ ./
+
+# Keep devDependencies because next.config.ts requires TypeScript
+# during Next.js startup.
+RUN npm run build
+
+
+FROM node:22-bookworm-slim AS runtime
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     NODE_ENV=production \
@@ -24,15 +34,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CORS_ORIGINS=http://127.0.0.1:3000 \
     BACKEND_INTERNAL_URL=http://127.0.0.1:8000 \
     NEXT_PUBLIC_DEMO_MODE=true \
-    NEXT_PUBLIC_API_BASE_URL= \
-    PORT=3000
+    NEXT_PUBLIC_API_BASE_URL=
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-venv \
+        python3-pip \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
 COPY backend/requirements.txt /app/backend/requirements.txt
+
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r /app/backend/requirements.txt
 
@@ -44,7 +59,10 @@ COPY database/ /app/database/
 COPY docs/ /app/docs/
 COPY docker/ /app/docker/
 COPY README-FIRST.txt DEMO_README.txt FULLSTACK_README.txt MATERIALS_SETUP.md /app/
-RUN chmod +x /app/docker/start-demo.sh && mkdir -p /app/backend/data
+
+RUN chmod +x /app/docker/start-demo.sh \
+    && mkdir -p /app/backend/data
 
 EXPOSE 3000
+
 CMD ["/app/docker/start-demo.sh"]
